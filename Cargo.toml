@@ -1,0 +1,11 @@
+[package]
+name = "remove-bg"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tokio = { version = "1", features = ["full"] }
+reqwest = { version = "0.12", features = ["json"] }
+serde_json = "1"
+base64 = "0.22"
+anyhow = "1"
