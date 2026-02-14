@@ -1,5 +1,7 @@
+mod join;
+
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 
 use anyhow::{anyhow, Result};
@@ -11,19 +13,84 @@ use tokio::sync::Semaphore;
 const API_TOKEN: &str = "r8_D9Vb0uVmeZblQHyuJdbyJItK3l9T51j1slO2Z";
 const MAX_CONCURRENT: usize = 10;
 
+fn parse_bitrate(s: &str) -> usize {
+    let s = s.trim();
+    if let Some(n) = s.strip_suffix('M').or_else(|| s.strip_suffix('m')) {
+        n.parse::<f64>().unwrap_or(4.0) as usize * 1_000_000
+    } else if let Some(n) = s.strip_suffix('K').or_else(|| s.strip_suffix('k'))
+    {
+        n.parse::<f64>().unwrap_or(4000.0) as usize * 1_000
+    } else {
+        s.parse().unwrap_or(4_000_000)
+    }
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().collect();
-    if args.len() != 3 {
-        eprintln!("Usage: remove-bg <output-dir-name> <model-version-hash>");
+
+    if args.get(1).map(|s| s.as_str()) == Some("join") {
+        if args.len() < 4 {
+            eprintln!(
+                "Usage: remove-bg join <input-dir> <output.webm> [--fps 24] [--bitrate 4M]"
+            );
+            std::process::exit(1);
+        }
+        let input_dir = &args[2];
+        let output_path = &args[3];
+        let fps = args
+            .iter()
+            .position(|s| s == "--fps")
+            .and_then(|i| args.get(i + 1))
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(24u32);
+        let bitrate = args
+            .iter()
+            .position(|s| s == "--bitrate")
+            .and_then(|i| args.get(i + 1))
+            .map(|s| parse_bitrate(s))
+            .unwrap_or(4_000_000);
+
+        let home = std::env::var("HOME")?;
+        let base = PathBuf::from(&home).join("replicate-remove-background");
+        let dir = if PathBuf::from(input_dir).exists() {
+            PathBuf::from(input_dir)
+        } else if base.join("output").join(input_dir).exists() {
+            base.join("output").join(input_dir)
+        } else {
+            PathBuf::from(input_dir)
+        };
+
+        return join::join_frames(&dir, output_path.as_ref(), fps, bitrate);
+    }
+
+    if args.len() < 3 {
+        eprintln!("Usage: remove-bg <output-dir> <version> [input-dir] [extra-json]");
+        eprintln!("       remove-bg join <input-dir> <output.webm> [--fps 24] [--bitrate 4M]");
+        eprintln!("  input-dir defaults to 'frames'");
+        eprintln!("  extra-json merges into input, e.g. '{{\"scale\":2}}'");
         std::process::exit(1);
     }
     let dir_name = &args[1];
     let model_version = &args[2];
+    let input_dir_name = args.get(3).map(|s| s.as_str()).unwrap_or("frames");
+    let extra_json: Value = args
+        .get(4)
+        .map(|s| serde_json::from_str(s).expect("invalid extra JSON"))
+        .unwrap_or(json!({}));
 
     let home = std::env::var("HOME")?;
     let base = PathBuf::from(&home).join("replicate-remove-background");
-    let frames_dir = base.join("frames");
+    let frames_dir = if input_dir_name.contains('/') {
+        PathBuf::from(input_dir_name)
+    } else {
+        base.join("output").join(input_dir_name)
+    };
+    let frames_dir = if frames_dir.exists() {
+        frames_dir
+    } else {
+        base.join(input_dir_name)
+    };
     let output_dir = base.join("output").join(dir_name);
     std::fs::create_dir_all(&output_dir)?;
 
@@ -57,8 +124,11 @@ async fn main() -> Result<()> {
         .build()?;
     let semaphore = Arc::new(Semaphore::new(MAX_CONCURRENT));
     let completed = Arc::new(AtomicUsize::new(0));
+    let total_predict_us = Arc::new(AtomicU64::new(0));
+    let total_wall_us = Arc::new(AtomicU64::new(0));
     let model_version = Arc::new(model_version.to_string());
     let dir_label = Arc::new(dir_name.to_string());
+    let extra_json = Arc::new(extra_json);
 
     let mut handles = Vec::new();
 
@@ -74,6 +144,9 @@ async fn main() -> Result<()> {
         let completed = completed.clone();
         let version = model_version.clone();
         let label = dir_label.clone();
+        let extra = extra_json.clone();
+        let predict_us = total_predict_us.clone();
+        let wall_us = total_wall_us.clone();
 
         let handle = tokio::spawn(async move {
             let _permit = sem.acquire().await.unwrap();
@@ -83,14 +156,21 @@ async fn main() -> Result<()> {
                 base64::engine::general_purpose::STANDARD.encode(&image_data);
             let data_uri = format!("data:image/png;base64,{}", b64);
 
+            let mut input = json!({ "image": data_uri });
+            if let (Some(base), Some(ext)) =
+                (input.as_object_mut(), extra.as_object())
+            {
+                for (k, v) in ext {
+                    base.insert(k.clone(), v.clone());
+                }
+            }
+
             let create_resp = client
                 .post("https://api.replicate.com/v1/predictions")
                 .header("Authorization", format!("Bearer {}", API_TOKEN))
                 .json(&json!({
                     "version": version.as_str(),
-                    "input": {
-                        "image": data_uri
-                    }
+                    "input": input
                 }))
                 .send()
                 .await?;
@@ -139,6 +219,22 @@ async fn main() -> Result<()> {
                             .await?;
                         tokio::fs::write(&output_path, &img_bytes).await?;
 
+                        if let Some(metrics) = poll_body.get("metrics") {
+                            if let Some(pt) = metrics["predict_time"].as_f64()
+                            {
+                                predict_us.fetch_add(
+                                    (pt * 1_000_000.0) as u64,
+                                    Ordering::Relaxed,
+                                );
+                            }
+                            if let Some(tt) = metrics["total_time"].as_f64() {
+                                wall_us.fetch_add(
+                                    (tt * 1_000_000.0) as u64,
+                                    Ordering::Relaxed,
+                                );
+                            }
+                        }
+
                         let done =
                             completed.fetch_add(1, Ordering::Relaxed) + 1;
                         println!(
@@ -180,11 +276,20 @@ async fn main() -> Result<()> {
         }
     }
 
+    let predict_secs =
+        total_predict_us.load(Ordering::Relaxed) as f64 / 1_000_000.0;
+    let wall_secs =
+        total_wall_us.load(Ordering::Relaxed) as f64 / 1_000_000.0;
+
     println!(
         "\n[{}] Done! {}/{} frames processed successfully.",
         dir_name,
         total - errors,
         total
+    );
+    println!(
+        "[{}] Predict time: {:.1}s | Wall time: {:.1}s",
+        dir_name, predict_secs, wall_secs
     );
     Ok(())
 }
