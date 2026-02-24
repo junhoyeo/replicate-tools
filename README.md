@@ -1,6 +1,13 @@
-# replicate-remove-background
+# replicate-tools
 
 Batch background removal and upscaling for 121 video frames using Replicate models. Written in Rust with async concurrency (10 workers).
+
+> [!TIP]
+> When using Midjourney, I recommend generating upscaled/HD videos first and then removing the background.
+
+> [!INFO]
+> The assets used in the examples were from [junhoyeo/tokscale](https://github.com/junhoyeo/tokscale).
+
 
 ## Usage
 
