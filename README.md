@@ -1,6 +1,6 @@
 # replicate-tools
 
-Batch background removal and upscaling for video frames using Replicate models. Written in Rust with async concurrency (10 workers).
+Batch background removal and upscaling for video frames using Replicate models, plus frame-to-video joining via FFmpeg. Written in Rust with async concurrency (10 workers).
 
 > [!TIP]
 > When using Midjourney, I recommend generating upscaled/HD videos first and then removing the background.
@@ -8,15 +8,46 @@ Batch background removal and upscaling for video frames using Replicate models. 
 > [!NOTE]
 > The assets used in the examples were used in [junhoyeo/tokscale](https://github.com/junhoyeo/tokscale)'s [Landing Page](https://tokscale.ai).
 
+## Prerequisites
+
+- [Rust](https://rustup.rs/) toolchain
+- FFmpeg development libraries (libvpx-vp9 for the `join` command)
+- [Replicate](https://replicate.com/) API token (set `API_TOKEN` in `src/main.rs`)
+
 ## Usage
 
+### Batch Process Frames
+
 ```bash
-cargo run --release <output-dir> <version> [input-dir] [extra-json]
+cargo run --release -- <output-dir> <version> [input-dir] [extra-json]
 ```
 
-- `input-dir` defaults to `frames`
-- `extra-json` merges into input, e.g. `'{"scale":2}'`
+| Argument | Description |
+|----------|-------------|
+| `output-dir` | Name for the output subdirectory (created under `~/replicate-remove-background/output/`) |
+| `version` | Replicate model version hash |
+| `input-dir` | Input frames directory (default: `frames`) |
+| `extra-json` | Extra JSON merged into each prediction input, e.g. `'{"scale":2}'` |
 - Skips already-processed frames automatically
+- Prints per-frame progress, then a summary with total predict time, wall time, and cost
+
+**Path resolution:** `input-dir` is resolved in order — absolute/relative path → `~/replicate-remove-background/output/<input-dir>` → `~/replicate-remove-background/<input-dir>`.
+
+### Join Frames into Video
+
+Combine processed PNG frames into a transparent WebM video (VP9 + YUVA420P).
+
+```bash
+cargo run --release -- join <input-dir> <output.webm> [--fps 24] [--bitrate 4M]
+```
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--fps` | `24` | Frame rate |
+| `--bitrate` | `4M` | Video bitrate (supports `M`/`K` suffixes, e.g. `8M`, `4000K`) |
+
+- Validates that all frames share the same dimensions before encoding
+- `input-dir` also uses smart path resolution (same as batch processing)
 
 ## Background Removal — Model Comparison
 
