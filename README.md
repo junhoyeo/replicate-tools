@@ -30,6 +30,7 @@ Frame 60 of 121 (`frame_0060.png`, 560×704):
 | Original | lucataco/remove-bg | smoretalk/rembg-enhance | cjwbw/rembg | pollinations/modnet |
 |:---:|:---:|:---:|:---:|:---:|
 | ![Original](.github/assets/original.png) | ![lucataco](.github/assets/lucataco-remove-bg.png) | ![smoretalk](.github/assets/smoretalk-rembg-enhance.png) | ![cjwbw](.github/assets/cjwbw-rembg.png) | ![modnet](.github/assets/pollinations-modnet.png) |
+
 **Verdict:** **`cjwbw/rembg`** — cleanest shadow removal with best edge preservation.
 
 ## 2× Upscaling — Model Comparison
