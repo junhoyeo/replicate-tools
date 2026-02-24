@@ -126,6 +126,7 @@ async fn main() -> Result<()> {
     let completed = Arc::new(AtomicUsize::new(0));
     let total_predict_us = Arc::new(AtomicU64::new(0));
     let total_wall_us = Arc::new(AtomicU64::new(0));
+    let total_cost_ucents = Arc::new(AtomicU64::new(0));
     let model_version = Arc::new(model_version.to_string());
     let dir_label = Arc::new(dir_name.to_string());
     let extra_json = Arc::new(extra_json);
@@ -147,6 +148,7 @@ async fn main() -> Result<()> {
         let extra = extra_json.clone();
         let predict_us = total_predict_us.clone();
         let wall_us = total_wall_us.clone();
+        let cost_uc = total_cost_ucents.clone();
 
         let handle = tokio::spawn(async move {
             let _permit = sem.acquire().await.unwrap();
@@ -235,6 +237,13 @@ async fn main() -> Result<()> {
                             }
                         }
 
+                        if let Some(cost) = poll_body.get("cost").and_then(|c| c.as_f64()) {
+                            cost_uc.fetch_add(
+                                (cost * 1_000_000.0) as u64,
+                                Ordering::Relaxed,
+                            );
+                        }
+
                         let done =
                             completed.fetch_add(1, Ordering::Relaxed) + 1;
                         println!(
@@ -280,6 +289,8 @@ async fn main() -> Result<()> {
         total_predict_us.load(Ordering::Relaxed) as f64 / 1_000_000.0;
     let wall_secs =
         total_wall_us.load(Ordering::Relaxed) as f64 / 1_000_000.0;
+    let cost_dollars =
+        total_cost_ucents.load(Ordering::Relaxed) as f64 / 1_000_000.0;
 
     println!(
         "\n[{}] Done! {}/{} frames processed successfully.",
@@ -288,8 +299,8 @@ async fn main() -> Result<()> {
         total
     );
     println!(
-        "[{}] Predict time: {:.1}s | Wall time: {:.1}s",
-        dir_name, predict_secs, wall_secs
+        "[{}] Predict time: {:.1}s | Wall time: {:.1}s | Cost: ${:.4}",
+        dir_name, predict_secs, wall_secs, cost_dollars
     );
     Ok(())
 }

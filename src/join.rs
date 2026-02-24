@@ -24,6 +24,35 @@ pub fn join_frames(input_dir: &Path, output_path: &Path, fps: u32, bitrate: usiz
     let width = first_img.width();
     let height = first_img.height();
     let total = frames.len();
+
+    println!("[join] Checking dimensions for {} frames...", total);
+    let mut mismatched = Vec::new();
+    for path in &frames[1..] {
+        let img = image::open(path)?;
+        if img.width() != width || img.height() != height {
+            mismatched.push((
+                path.file_name().unwrap().to_string_lossy().to_string(),
+                img.width(),
+                img.height(),
+            ));
+        }
+    }
+    if !mismatched.is_empty() {
+        eprintln!(
+            "[join] ERROR: {} frames have different dimensions (expected {}x{}):",
+            mismatched.len(),
+            width,
+            height
+        );
+        for (name, w, h) in &mismatched {
+            eprintln!("  - {} ({}x{})", name, w, h);
+        }
+        return Err(anyhow!(
+            "{} frames have mismatched dimensions",
+            mismatched.len()
+        ));
+    }
+
     println!(
         "[join] {} frames ({}x{}) @ {}fps, bitrate {}",
         total, width, height, fps, bitrate
