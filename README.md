@@ -5,9 +5,8 @@ Batch background removal and upscaling for video frames using Replicate models. 
 > [!TIP]
 > When using Midjourney, I recommend generating upscaled/HD videos first and then removing the background.
 
-> [!INFO]
+> [!NOTE]
 > The assets used in the examples were from [junhoyeo/tokscale](https://github.com/junhoyeo/tokscale).
-
 
 ## Usage
 
