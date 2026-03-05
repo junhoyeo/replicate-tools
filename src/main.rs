@@ -10,7 +10,6 @@ use reqwest::Client;
 use serde_json::{json, Value};
 use tokio::sync::Semaphore;
 
-const API_TOKEN: &str = "r8_D9Vb0uVmeZblQHyuJdbyJItK3l9T51j1slO2Z";
 const MAX_CONCURRENT: usize = 10;
 
 fn parse_bitrate(s: &str) -> usize {
@@ -71,6 +70,8 @@ async fn main() -> Result<()> {
         eprintln!("  extra-json merges into input, e.g. '{{\"scale\":2}}'");
         std::process::exit(1);
     }
+    let api_token = std::env::var("REPLICATE_API_TOKEN")
+        .expect("REPLICATE_API_TOKEN env var is required");
     let dir_name = &args[1];
     let model_version = &args[2];
     let input_dir_name = args.get(3).map(|s| s.as_str()).unwrap_or("frames");
@@ -130,6 +131,7 @@ async fn main() -> Result<()> {
     let model_version = Arc::new(model_version.to_string());
     let dir_label = Arc::new(dir_name.to_string());
     let extra_json = Arc::new(extra_json);
+    let api_token = Arc::new(api_token);
 
     let mut handles = Vec::new();
 
@@ -149,6 +151,7 @@ async fn main() -> Result<()> {
         let predict_us = total_predict_us.clone();
         let wall_us = total_wall_us.clone();
         let cost_uc = total_cost_ucents.clone();
+        let api_token = api_token.clone();
 
         let handle = tokio::spawn(async move {
             let _permit = sem.acquire().await.unwrap();
@@ -169,7 +172,7 @@ async fn main() -> Result<()> {
 
             let create_resp = client
                 .post("https://api.replicate.com/v1/predictions")
-                .header("Authorization", format!("Bearer {}", API_TOKEN))
+                .header("Authorization", format!("Bearer {}", api_token))
                 .json(&json!({
                     "version": version.as_str(),
                     "input": input
@@ -198,7 +201,7 @@ async fn main() -> Result<()> {
                         "https://api.replicate.com/v1/predictions/{}",
                         prediction_id
                     ))
-                    .header("Authorization", format!("Bearer {}", API_TOKEN))
+                    .header("Authorization", format!("Bearer {}", api_token))
                     .send()
                     .await?;
 

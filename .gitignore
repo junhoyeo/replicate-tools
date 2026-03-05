@@ -2,3 +2,5 @@
 output/
 frames/
 .DS_Store
+
+.env
